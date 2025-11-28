@@ -1,7 +1,9 @@
 package de.galacticfy.galacticfyChat.listener;
 
 import de.galacticfy.galacticfyChat.GalacticfyChat;
-import de.galacticfy.galacticfyChat.npc.NpcManager;
+import org.bukkit.Bukkit;
+import org.bukkit.Sound;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -11,36 +13,38 @@ import org.bukkit.event.player.PlayerQuitEvent;
 public class JoinQuitListener implements Listener {
 
     private final GalacticfyChat plugin;
-    private final NpcManager npcManager;
-
-    // Damit NPCs nur EINMAL nachgeladen werden
-    private boolean npcSpawnedOnce = false;
 
     public JoinQuitListener() {
         this.plugin = GalacticfyChat.getInstance();
-        this.npcManager = plugin.getNpcManager();
     }
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
-        // Keine Join-Meldung
+        Player p = event.getPlayer();
+
+        // Keine Join-Nachricht
         event.setJoinMessage(null);
 
-        // Nametag + Scoreboard
-        plugin.getRankService().updateNametag(event.getPlayer());
-        plugin.getScoreboardService().updateBoard(event.getPlayer());
+        // Nametag + Scoreboard direkt setzen
+        plugin.getRankService().updateNametag(p);
+        plugin.getScoreboardService().updateBoard(p);
 
-        // ===============================
-        //  NPCs sicher nachladen
-        // ===============================
-        if (!npcSpawnedOnce) {
-            npcSpawnedOnce = true;
+        // Kleines Welcome-Title + Sound
 
-            // NPCs neu laden und LookTask starten
-            npcManager.loadAndSpawnAll();
-            npcManager.startLookTask();
-
-            plugin.getLogger().info("[GalacticfyChat] NPCs wurden beim ersten Join neu geladen.");
+        // NPC-Fix: wenn dies der erste Spieler auf dem Server ist,
+        // nach kurzer Zeit NPCs neu laden + spawnen.
+        if (Bukkit.getOnlinePlayers().size() == 1) {
+            Bukkit.getScheduler().runTaskLater(
+                    plugin,
+                    () -> {
+                        if (plugin.getNpcManager() != null) {
+                            plugin.getLogger().info("[GalacticfyChat] Erster Spieler join -> NPCs neu laden.");
+                            plugin.getNpcManager().despawnAll();
+                            plugin.getNpcManager().loadAndSpawnAll();
+                        }
+                    },
+                    20L // 1 Sekunde Delay
+            );
         }
     }
 
@@ -49,9 +53,8 @@ public class JoinQuitListener implements Listener {
         // Keine Quit-Nachricht
         event.setQuitMessage(null);
 
-        // Nametag aufräumen
+        // Nametag / Teams aufräumen
         plugin.getRankService().clearNametag(event.getPlayer());
-
         // Scoreboard entfernen
         plugin.getScoreboardService().removeBoard(event.getPlayer());
     }
@@ -60,5 +63,7 @@ public class JoinQuitListener implements Listener {
     public void onDeath(PlayerDeathEvent event) {
         // Keine Todesnachricht
         event.deathMessage(null);
+        // bei älteren Spigot-Versionen:
+        // event.setDeathMessage(null);
     }
 }

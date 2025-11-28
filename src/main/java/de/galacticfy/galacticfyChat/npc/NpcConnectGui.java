@@ -5,8 +5,10 @@ import com.google.common.io.ByteStreams;
 import de.galacticfy.galacticfyChat.GalacticfyChat;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
@@ -35,11 +37,13 @@ public class NpcConnectGui implements Listener {
     private static final NamespacedKey SERVER_ID_KEY =
             new NamespacedKey(GalacticfyChat.getInstance(), "server_id");
 
-    private record ServerButton(String serverId,
-                                String displayName,
-                                Material material,
-                                List<String> lore,
-                                boolean comingSoon) {}
+    private record ServerButton(
+            String serverId,
+            String displayName,
+            Material material,
+            List<String> lore,
+            boolean comingSoon
+    ) {}
 
     private static final List<String> TIPS = List.of(
             "§8Tipp: §7Mit §b/hub§7 kommst du immer zur Lobby.",
@@ -94,7 +98,7 @@ public class NpcConnectGui implements Listener {
             new ServerButton(
                     null,
                     "§8Coming Soon",
-                    Material.GRAY_STAINED_GLASS_PANE,
+                    Material.BLACK_CONCRETE,
                     Arrays.asList(
                             "§7Geplanter weiterer",
                             "§aCitybuild§7-Server.",
@@ -118,7 +122,7 @@ public class NpcConnectGui implements Listener {
             new ServerButton(
                     null,
                     "§8Coming Soon",
-                    Material.GRAY_STAINED_GLASS_PANE,
+                    Material.BLACK_CONCRETE,
                     Arrays.asList(
                             "§7Noch ein Citybuild-Slot",
                             "§7für zukünftige Erweiterungen.",
@@ -134,7 +138,7 @@ public class NpcConnectGui implements Listener {
             new ServerButton(
                     null,
                     "§8Coming Soon",
-                    Material.GRAY_STAINED_GLASS_PANE,
+                    Material.BLACK_CONCRETE,
                     Arrays.asList(
                             "§7Hier könnte §3Skyblock-2§7",
                             "§7entstehen.",
@@ -158,7 +162,7 @@ public class NpcConnectGui implements Listener {
             new ServerButton(
                     null,
                     "§8Coming Soon",
-                    Material.GRAY_STAINED_GLASS_PANE,
+                    Material.BLACK_CONCRETE,
                     Arrays.asList(
                             "§7Noch ein Slot für",
                             "§3Skyblock§7 in Planung.",
@@ -179,10 +183,13 @@ public class NpcConnectGui implements Listener {
                     .toArray(String[]::new);
 
     // ------------------------------------------------
-    // GUI öffnen – Entry + Fokus-Animation
+    // GUI öffnen – nur Buttons animieren (Fly-In)
     // ------------------------------------------------
     public static void open(Player player, Npc npc) {
-        String type = npc.getType() != null ? npc.getType().toUpperCase() : "";
+        String type = npc.getType() != null ? npc.getType().toUpperCase(Locale.ROOT) : "";
+
+        // ✨ Effekt direkt am NPC
+        playNpcEffect(player, npc, type);
 
         List<ServerButton> buttons;
         String title;
@@ -240,7 +247,7 @@ public class NpcConnectGui implements Listener {
         String tip = TIPS.get(ThreadLocalRandom.current().nextInt(TIPS.size()));
 
         // Info-Item oben Mitte
-        ItemStack info = new ItemStack(Material.AMETHYST_SHARD);
+        ItemStack info = new ItemStack(Material.NETHER_STAR);
         ItemMeta infoMeta = info.getItemMeta();
         if (infoMeta != null) {
             infoMeta.setDisplayName("§bGalacticfy §7Netzwerk");
@@ -272,140 +279,161 @@ public class NpcConnectGui implements Listener {
         player.playSound(player.getLocation(), Sound.UI_LOOM_SELECT_PATTERN, 0.7f, 1.4f);
 
         // Ziel-Slots
-        final int leftTarget  = 11;
-        final int centerSlot  = 13;
-        final int rightTarget = 15;
+        final int leftTarget   = 11;
+        final int centerTarget = 13;
+        final int rightTarget  = 15;
 
-        // -------- Entry-Animation (Slide & Pop) --------
-
-        // links: 10 -> 11
-        if (buttons.size() >= 1) {
-            ServerButton leftButton = buttons.get(0);
-            Bukkit.getScheduler().runTaskLater(
-                    GalacticfyChat.getInstance(),
-                    () -> {
-                        if (!player.getOpenInventory().getTopInventory().equals(inv)) return;
-                        int startSlot = 10;
-                        inv.setItem(startSlot, createServerItem(leftButton));
-                        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 0.6f, 1.5f);
-
-                        Bukkit.getScheduler().runTaskLater(
-                                GalacticfyChat.getInstance(),
-                                () -> {
-                                    if (!player.getOpenInventory().getTopInventory().equals(inv)) return;
-                                    inv.setItem(startSlot, filler);
-                                    inv.setItem(leftTarget, createServerItem(leftButton));
-                                },
-                                2L
-                        );
-                    },
-                    4L
-            );
+        // Links: Coming Soon oder erster Button
+        if (!buttons.isEmpty()) {
+            ItemStack leftItem = createServerItem(buttons.get(0));
+            int[] leftPath = {9, 10, leftTarget};
+            flyIn(inv, player, leftPath, leftItem, filler, 2L);
         }
 
-        // rechts: 16 -> 15
+        // Rechts: dritter Button (wenn vorhanden)
         if (buttons.size() >= 3) {
-            ServerButton rightButton = buttons.get(2);
+            ItemStack rightItem = createServerItem(buttons.get(2));
+            int[] rightPath = {17, 16, rightTarget};
+            flyIn(inv, player, rightPath, rightItem, filler, 2L);
+        }
+
+        // Mitte: Haupt-Server
+        if (buttons.size() >= 2) {
+            ItemStack centerItem = createServerItem(buttons.get(1));
+
             Bukkit.getScheduler().runTaskLater(
                     GalacticfyChat.getInstance(),
                     () -> {
                         if (!player.getOpenInventory().getTopInventory().equals(inv)) return;
-                        int startSlot = 16;
-                        inv.setItem(startSlot, createServerItem(rightButton));
-                        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 0.6f, 1.7f);
 
+                        // kurz „ploppen“: direkt setzen + Glow
+                        centerItem.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
+                        ItemMeta cm = centerItem.getItemMeta();
+                        if (cm != null) {
+                            cm.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+                            centerItem.setItemMeta(cm);
+                        }
+                        inv.setItem(centerTarget, centerItem);
+
+                        player.playSound(
+                                player.getLocation(),
+                                Sound.BLOCK_NOTE_BLOCK_PLING,
+                                0.9f,
+                                1.7f
+                        );
+
+                        // Glow nach kurzer Zeit wieder weg
                         Bukkit.getScheduler().runTaskLater(
                                 GalacticfyChat.getInstance(),
                                 () -> {
-                                    if (!player.getOpenInventory().getTopInventory().equals(inv)) return;
-                                    inv.setItem(startSlot, filler);
-                                    inv.setItem(rightTarget, createServerItem(rightButton));
+                                    ItemStack current = inv.getItem(centerTarget);
+                                    if (current == null) return;
+                                    if (current.containsEnchantment(Enchantment.VANISHING_CURSE)) {
+                                        current.removeEnchantment(Enchantment.VANISHING_CURSE);
+                                        inv.setItem(centerTarget, current);
+                                    }
                                 },
-                                2L
+                                12L
                         );
                     },
                     8L
             );
         }
+    }
 
-        // mitte poppt rein
-        if (buttons.size() >= 2) {
-            ServerButton centerButton = buttons.get(1);
-            Bukkit.getScheduler().runTaskLater(
-                    GalacticfyChat.getInstance(),
-                    () -> {
-                        if (!player.getOpenInventory().getTopInventory().equals(inv)) return;
-                        inv.setItem(centerSlot, createServerItem(centerButton));
-                        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.9f, 1.6f);
-                    },
-                    12L
-            );
+    // Effekt am NPC (Partikel + Sound)
+    private static void playNpcEffect(Player player, Npc npc, String type) {
+        Location loc = npc.toLocation();
+        if (loc == null || loc.getWorld() == null) return;
+
+        Sound s;
+        switch (type) {
+            case "CB_SELECTOR":
+            case "CITYBUILD_SELECTOR":
+            case "CITYBUILD":
+                s = Sound.BLOCK_NOTE_BLOCK_BELL;
+                break;
+            case "SKYBLOCK_SELECTOR":
+            case "SKYBLOCK":
+                s = Sound.BLOCK_AMETHYST_BLOCK_CHIME;
+                break;
+            case "SERVER_SELECTOR":
+            default:
+                s = Sound.BLOCK_BEACON_ACTIVATE;
+                break;
         }
 
-        // -------- Dauer-Animation: Fokus rotiert --------
-        final int[] buttonSlots = {leftTarget, centerSlot, rightTarget};
+        // Sound beim NPC abspielen
+        player.playSound(loc, s, 0.8f, 1.2f);
+
+        // kleiner Partikelring um den NPC-Kopf
+        Location base = loc.clone().add(0, 1.6, 0);
+        for (int i = 0; i < 10; i++) {
+            double angle = (Math.PI * 2 / 10) * i;
+            double x = Math.cos(angle) * 0.6;
+            double z = Math.sin(angle) * 0.6;
+            base.getWorld().spawnParticle(
+                    Particle.END_ROD,
+                    base.getX() + x,
+                    base.getY(),
+                    base.getZ() + z,
+                    1,
+                    0, 0, 0, 0
+            );
+        }
+    }
+
+    private static void flyIn(Inventory inv,
+                              Player player,
+                              int[] pathSlots,
+                              ItemStack item,
+                              ItemStack filler,
+                              long stepTicks) {
 
         new BukkitRunnable() {
-            int highlightIndex = 0;
+            int index = 0;
+            int lastSlot = -1;
 
             @Override
             public void run() {
-                // GUI noch offen?
                 if (!player.getOpenInventory().getTopInventory().equals(inv)) {
                     cancel();
                     return;
                 }
 
-                // Highlight rotiert zwischen 0,1,2
-                highlightIndex = (highlightIndex + 1) % buttonSlots.length;
-
-                for (int i = 0; i < buttonSlots.length; i++) {
-                    int slot = buttonSlots[i];
-                    ItemStack item = inv.getItem(slot);
-                    if (item == null || !item.hasItemMeta()) continue;
-
-                    ItemMeta meta = item.getItemMeta();
-                    if (meta == null) continue;
-
-                    String serverId = meta.getPersistentDataContainer()
-                            .get(SERVER_ID_KEY, PersistentDataType.STRING);
-
-                    boolean isRealServer = serverId != null && !serverId.isEmpty();
-
-                    // Coming Soon → nur minimal animiert
-                    if (!isRealServer) {
-                        // Coming Soon: kein Glow, aber leichte "Bewegung" über Name
-                        if (i == highlightIndex) {
-                            if (!meta.getDisplayName().startsWith("§7» ")) {
-                                meta.setDisplayName("§7» " + meta.getDisplayName());
-                                item.setItemMeta(meta);
-                            }
-                        } else {
-                            if (meta.getDisplayName().startsWith("§7» ")) {
-                                meta.setDisplayName(meta.getDisplayName().substring(4));
-                                item.setItemMeta(meta);
-                            }
-                        }
-                        continue;
-                    }
-
-                    // Echte Server: Fokus-GLOW
-                    if (i == highlightIndex) {
-                        if (!item.containsEnchantment(Enchantment.VANISHING_CURSE)) {
-                            item.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
-                            inv.setItem(slot, item);
-                            player.playSound(player.getLocation(),
-                                    Sound.BLOCK_NOTE_BLOCK_PLING, 0.4f, 1.9f);
-                        }
-                    } else {
-                        if (item.containsEnchantment(Enchantment.VANISHING_CURSE)) {
-                            item.removeEnchantment(Enchantment.VANISHING_CURSE);
-                            inv.setItem(slot, item);
-                        }
-                    }
+                if (index >= pathSlots.length) {
+                    cancel();
+                    return;
                 }
+
+                int slot = pathSlots[index];
+
+                if (lastSlot != -1) {
+                    inv.setItem(lastSlot, filler);
+                }
+
+                inv.setItem(slot, item.clone());
+
+                if (index == pathSlots.length - 1) {
+                    player.playSound(
+                            player.getLocation(),
+                            Sound.BLOCK_NOTE_BLOCK_HAT,
+                            0.6f,
+                            1.6f
+                    );
+                } else {
+                    player.playSound(
+                            player.getLocation(),
+                            Sound.BLOCK_NOTE_BLOCK_SNARE,
+                            0.4f,
+                            1.4f
+                    );
+                }
+
+                lastSlot = slot;
+                index++;
             }
-        }.runTaskTimer(GalacticfyChat.getInstance(), 24L, 12L); // Start nach Entry, alle ~0.6s
+        }.runTaskTimer(GalacticfyChat.getInstance(), 0L, stepTicks);
     }
 
     private static ItemStack namedPane(Material mat, String name) {
@@ -424,26 +452,24 @@ public class NpcConnectGui implements Listener {
         if (meta != null) {
             meta.setDisplayName(button.displayName());
             meta.setLore(button.lore());
-            meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
-            meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+            meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS);
             item.setItemMeta(meta);
 
-            meta = item.getItemMeta();
-            if (meta != null && button.serverId() != null) {
-                meta.getPersistentDataContainer().set(
-                        SERVER_ID_KEY,
-                        PersistentDataType.STRING,
-                        button.serverId()
-                );
-                item.setItemMeta(meta);
+            if (button.serverId() != null) {
+                meta = item.getItemMeta();
+                if (meta != null) {
+                    meta.getPersistentDataContainer().set(
+                            SERVER_ID_KEY,
+                            PersistentDataType.STRING,
+                            button.serverId()
+                    );
+                    item.setItemMeta(meta);
+                }
             }
         }
         return item;
     }
 
-    // ------------------------------------------------
-    // Klick-Handling
-    // ------------------------------------------------
     @EventHandler
     public void onClick(InventoryClickEvent e) {
         if (!(e.getWhoClicked() instanceof Player player)) return;
@@ -451,10 +477,9 @@ public class NpcConnectGui implements Listener {
         String title = e.getView().getTitle();
         if (title == null) return;
 
-        String stripped = ChatColor.stripColor(title).toLowerCase();
+        String stripped = ChatColor.stripColor(title).toLowerCase(Locale.ROOT);
         if (!stripped.contains(TITLE_KEYWORD)) return;
 
-        // Unser GUI → immer canceln
         e.setCancelled(true);
 
         ItemStack clicked = e.getCurrentItem();
@@ -467,27 +492,23 @@ public class NpcConnectGui implements Listener {
                 ? ChatColor.stripColor(meta.getDisplayName())
                 : "";
 
-        // Schließen
         if (displayName.equalsIgnoreCase("Schließen")) {
             player.closeInventory();
             player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.7f, 1.0f);
             return;
         }
 
-        // Server-ID
         String targetServer = meta.getPersistentDataContainer()
                 .get(SERVER_ID_KEY, PersistentDataType.STRING);
 
-        // Coming Soon
         if (targetServer == null || targetServer.isEmpty()) {
-            if (displayName.toLowerCase().contains("coming soon")) {
+            if (displayName.toLowerCase(Locale.ROOT).contains("coming soon")) {
                 player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f);
                 player.sendMessage("§8[§bGalacticfy§8] §7Dieser Server ist §cnoch nicht§7 verfügbar.");
             }
             return;
         }
 
-        // Connect
         player.closeInventory();
         player.sendMessage("§7Verbinde zu §b" + targetServer + "§7...");
         player.playSound(player.getLocation(), Sound.ENTITY_ENDERMAN_TELEPORT, 0.7f, 1.2f);

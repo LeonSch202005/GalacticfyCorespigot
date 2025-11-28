@@ -3,6 +3,7 @@ package de.galacticfy.galacticfyChat.npc;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.LivingEntity;
 
 public class Npc {
 
@@ -18,6 +19,9 @@ public class Npc {
     private final String type;
     private final String targetServer;
     private final String skinUuid;
+
+    // Laufzeit-Referenz auf das echte Entity
+    private transient LivingEntity entity;
 
     public Npc(int id,
                String serverName,
@@ -60,5 +64,13 @@ public class Npc {
         World world = Bukkit.getWorld(worldName);
         if (world == null) return null;
         return new Location(world, x, y, z, yaw, pitch);
+    }
+
+    public LivingEntity getEntity() {
+        return entity;
+    }
+
+    public void setEntity(LivingEntity entity) {
+        this.entity = entity;
     }
 }

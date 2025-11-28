@@ -2,6 +2,7 @@ package de.galacticfy.galacticfyChat.npc;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
@@ -22,8 +23,11 @@ public class NpcManager {
 
     private static final EntityType DEFAULT_NPC_ENTITY_TYPE = EntityType.VILLAGER;
 
+    // id -> Body-Entity
     private final Map<Integer, Entity> spawned = new HashMap<>();
+    // id -> Npc (inkl. entity-Ref)
     private final Map<Integer, Npc> cache = new HashMap<>();
+    // id -> Hologramm-ArmorStands
     private final Map<Integer, List<ArmorStand>> holograms = new HashMap<>();
 
     private BukkitTask lookTask;
@@ -69,6 +73,10 @@ public class NpcManager {
         }
         spawned.clear();
 
+        for (Npc npc : cache.values()) {
+            npc.setEntity(null);
+        }
+
         for (List<ArmorStand> list : holograms.values()) {
             for (ArmorStand as : list) {
                 as.remove();
@@ -101,12 +109,14 @@ public class NpcManager {
         body.setRemoveWhenFarAway(false);
         try {
             body.setPersistent(false);
-        } catch (NoSuchMethodError ignored) {
-        }
+        } catch (NoSuchMethodError ignored) {}
 
         applyPlayerSkinIfPossible(body, npc.getName());
 
         spawned.put(npc.getId(), body);
+
+        // 🔥 Wichtig: Entity im Npc speichern, damit der Look-Task es findet
+        npc.setEntity(body);
 
         spawnHolograms(npc, body.getLocation());
 
@@ -125,7 +135,6 @@ public class NpcManager {
             Constructor<?> ctor = playerDisguiseClass.getConstructor(String.class);
             Object playerDisguise = ctor.newInstance(skinName);
 
-            // Name vom Disguise ausblenden, wenn möglich
             try {
                 Method setNameVisible = playerDisguiseClass.getMethod("setNameVisible", boolean.class);
                 setNameVisible.invoke(playerDisguise, false);
@@ -167,8 +176,7 @@ public class NpcManager {
                 s.setArms(false);
                 try {
                     s.setPersistent(false);
-                } catch (NoSuchMethodError ignored) {
-                }
+                } catch (NoSuchMethodError ignored) {}
             });
 
             list.add(holo);
@@ -246,6 +254,11 @@ public class NpcManager {
         Entity e = spawned.remove(id);
         if (e != null) e.remove();
         clearHolograms(id);
+
+        Npc npc = cache.get(id);
+        if (npc != null) {
+            npc.setEntity(null);
+        }
         cache.remove(id);
     }
 
@@ -353,52 +366,20 @@ public class NpcManager {
     }
 
     // =========================================================
-    //  Auto-Look (schnell, ohne Delay)
+    //  Look-Task: NPC schaut zum nächsten Spieler
     // =========================================================
     public void startLookTask() {
-        stopLookTask();
+        if (lookTask != null) return; // schon aktiv
 
         lookTask = Bukkit.getScheduler().runTaskTimer(
                 plugin,
                 () -> {
-                    try {
-                        if (spawned.isEmpty()) return;
-
-                        for (Entity e : spawned.values()) {
-                            if (!(e instanceof LivingEntity living)) continue;
-
-                            Location npcLoc = living.getLocation();
-                            Player nearest = getNearestPlayer(npcLoc, 8.0);
-                            if (nearest == null) continue;
-
-                            Location eye = nearest.getEyeLocation();
-                            double dx = eye.getX() - npcLoc.getX();
-                            double dy = eye.getY() - (npcLoc.getY() + 1.6);
-                            double dz = eye.getZ() - npcLoc.getZ();
-
-                            double distXZ = Math.sqrt(dx * dx + dz * dz);
-                            if (distXZ < 0.001) continue;
-
-                            float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-                            float pitch = (float) Math.toDegrees(-Math.atan2(dy, distXZ));
-
-                            try {
-                                // versuch nur Rotation zu setzen
-                                living.setRotation(yaw, pitch);
-                            } catch (NoSuchMethodError err) {
-                                // fallback: Teleport mit neuer Rotation
-                                npcLoc.setYaw(yaw);
-                                npcLoc.setPitch(pitch);
-                                living.teleport(npcLoc);
-                            }
-                        }
-                    } catch (Exception ex) {
-                        plugin.getLogger().warning("[NPC] Fehler im LookTask: " + ex.getMessage());
-                        ex.printStackTrace();
+                    for (Npc npc : cache.values()) {
+                        updateLookForNpc(npc);
                     }
                 },
-                1L,   // Start nach 1 Tick
-                1L    // JEDEN Tick
+                10L,   // erster Lauf nach 0,5s
+                2L     // alle 2 Ticks (~0,1s)
         );
     }
 
@@ -409,19 +390,42 @@ public class NpcManager {
         }
     }
 
-    private Player getNearestPlayer(Location loc, double radius) {
-        Player closest = null;
-        double closestDistSq = radius * radius;
+    private void updateLookForNpc(Npc npc) {
+        LivingEntity entity = npc.getEntity();
+        if (entity == null || !entity.isValid()) return;
 
-        for (Player p : Bukkit.getOnlinePlayers()) {
-            if (!p.getWorld().equals(loc.getWorld())) continue;
+        Player target = null;
+        double bestDistSq = 16 * 16; // max 16 Blöcke
 
-            double distSq = p.getLocation().distanceSquared(loc);
-            if (distSq <= closestDistSq) {
-                closestDistSq = distSq;
-                closest = p;
+        for (Player p : entity.getWorld().getPlayers()) {
+            if (!p.isOnline() || p.isDead()) continue;
+
+            double distSq = p.getLocation().distanceSquared(entity.getLocation());
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                target = p;
             }
         }
-        return closest;
+
+        if (target == null) return;
+
+        Location from = entity.getLocation().clone();
+        Location to   = target.getLocation().clone().add(0, 1.6, 0); // auf den Kopf zielen
+
+        double dx = to.getX() - from.getX();
+        double dy = to.getY() - (from.getY() + entity.getEyeHeight());
+        double dz = to.getZ() - from.getZ();
+
+        double distXZ = Math.sqrt(dx * dx + dz * dz);
+
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = (float) Math.toDegrees(-Math.atan2(dy, distXZ));
+
+        from.setYaw(yaw);
+        from.setPitch(pitch);
+
+        // kein TP – nur Kopf drehen
+        entity.teleport(from);
     }
+
 }
