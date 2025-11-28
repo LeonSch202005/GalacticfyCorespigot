@@ -1,0 +1,15 @@
+name: GalacticfyChat
+version: '0.0'
+main: de.galacticfy.galacticfyChat.GalacticfyChat
+api-version: '1.21'
+authors: [ Leon ]
+website: https://galacticfy.de
+
+commands:
+  npcreload:
+    description: Lädt alle NPCs aus der Datenbank neu.
+    permission: galacticfy.npc.reload
+  npcpos:
+    description: Setzt die Position eines NPCs in der Datenbank.
+    usage: /npcpos set <id>
+    permission: galacticfy.npc.edit
