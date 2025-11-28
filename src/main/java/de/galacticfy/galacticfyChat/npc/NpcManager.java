@@ -1,185 +1,427 @@
 package de.galacticfy.galacticfyChat.npc;
 
-import de.galacticfy.galacticfyChat.GalacticfyChat;
-import de.galacticfy.galacticfyChat.npc.NpcRepository.NpcData;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.Location;
-import org.bukkit.World;
+import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
-import org.bukkit.entity.Villager;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.logging.Logger;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.util.*;
 
 public class NpcManager {
 
     private final Plugin plugin;
-    private final NpcRepository repository;
+    private final NpcRepository repo;
     private final String serverName;
-    private final Logger logger;
 
-    // id -> NPC-Entity
-    private final Map<String, LivingEntity> npcs = new HashMap<>();
+    private static final EntityType DEFAULT_NPC_ENTITY_TYPE = EntityType.VILLAGER;
 
-    // Task für "NPC schaut Spieler an"
+    private final Map<Integer, Entity> spawned = new HashMap<>();
+    private final Map<Integer, Npc> cache = new HashMap<>();
+    private final Map<Integer, List<ArmorStand>> holograms = new HashMap<>();
+
     private BukkitTask lookTask;
 
-    public NpcManager(GalacticfyChat plugin,
-                      NpcRepository repository,
-                      String serverName) {
+    public NpcManager(Plugin plugin, NpcRepository repo, String serverName) {
         this.plugin = plugin;
-        this.repository = repository;
+        this.repo = repo;
         this.serverName = serverName;
-        this.logger = plugin.getLogger();
     }
 
-    // --------------------------------------------------------------------
-    // Laden + Spawnen aller NPCs für diesen Server
-    // --------------------------------------------------------------------
+    // =========================================================
+    //  Laden / Spawnen
+    // =========================================================
     public void loadAndSpawnAll() {
-        logger.info("[GalacticfyChat] NPC-Spawn: lade Einträge für Server '" + serverName + "'...");
+        despawnAll();
+        cache.clear();
 
-        List<NpcData> list = repository.findByServer(serverName);
-        int count = 0;
+        List<Npc> npcs = repo.findByServer(serverName);
+        for (Npc npc : npcs) {
+            cache.put(npc.getId(), npc);
+            cleanupAroundNpc(npc);
+            spawnNpc(npc);
+        }
 
-        for (NpcData data : list) {
-            if (spawnNpc(data)) {
-                count++;
+        plugin.getLogger().info("[NPC] Loaded " + npcs.size() + " NPCs für Server " + serverName);
+    }
+
+    private void cleanupAroundNpc(Npc npc) {
+        Location loc = npc.toLocation();
+        if (loc == null || loc.getWorld() == null) return;
+
+        double r = 1.5;
+        for (Entity e : loc.getWorld().getNearbyEntities(loc, r, r, r)) {
+            if (e instanceof ArmorStand || e.getType() == DEFAULT_NPC_ENTITY_TYPE) {
+                e.remove();
+            }
+        }
+    }
+
+    public void despawnAll() {
+        for (Entity e : spawned.values()) {
+            e.remove();
+        }
+        spawned.clear();
+
+        for (List<ArmorStand> list : holograms.values()) {
+            for (ArmorStand as : list) {
+                as.remove();
+            }
+        }
+        holograms.clear();
+    }
+
+    public Entity spawnNpc(Npc npc) {
+        Location loc = npc.toLocation();
+        if (loc == null || loc.getWorld() == null) {
+            plugin.getLogger().warning("[NPC] World " + npc.getWorldName() + " nicht geladen für NPC " + npc.getId());
+            return null;
+        }
+
+        Entity old = spawned.get(npc.getId());
+        if (old != null) {
+            old.remove();
+        }
+        clearHolograms(npc.getId());
+
+        LivingEntity body = (LivingEntity) loc.getWorld().spawnEntity(loc, DEFAULT_NPC_ENTITY_TYPE);
+
+        body.setCustomNameVisible(false);
+        body.setCustomName(null);
+        body.setAI(false);
+        body.setGravity(false);
+        body.setCollidable(false);
+        body.setInvulnerable(true);
+        body.setRemoveWhenFarAway(false);
+        try {
+            body.setPersistent(false);
+        } catch (NoSuchMethodError ignored) {
+        }
+
+        applyPlayerSkinIfPossible(body, npc.getName());
+
+        spawned.put(npc.getId(), body);
+
+        spawnHolograms(npc, body.getLocation());
+
+        return body;
+    }
+
+    private void applyPlayerSkinIfPossible(LivingEntity entity, String skinName) {
+        if (skinName == null || skinName.isBlank()) return;
+        if (Bukkit.getPluginManager().getPlugin("LibsDisguises") == null) return;
+
+        try {
+            Class<?> disguiseApiClass = Class.forName("me.libraryaddict.disguise.DisguiseAPI");
+            Class<?> playerDisguiseClass = Class.forName("me.libraryaddict.disguise.disguisetypes.PlayerDisguise");
+            Class<?> disguiseBaseClass = Class.forName("me.libraryaddict.disguise.disguisetypes.Disguise");
+
+            Constructor<?> ctor = playerDisguiseClass.getConstructor(String.class);
+            Object playerDisguise = ctor.newInstance(skinName);
+
+            // Name vom Disguise ausblenden, wenn möglich
+            try {
+                Method setNameVisible = playerDisguiseClass.getMethod("setNameVisible", boolean.class);
+                setNameVisible.invoke(playerDisguise, false);
+            } catch (NoSuchMethodException ignored) {}
+
+            Method disguiseToAll = disguiseApiClass.getMethod("disguiseToAll", Entity.class, disguiseBaseClass);
+            disguiseToAll.invoke(null, entity, playerDisguise);
+
+            plugin.getLogger().info("[NPC] LibsDisguises: Spieler-Skin '" + skinName + "' auf NPC angewendet.");
+        } catch (Exception e) {
+            plugin.getLogger().warning("[NPC] Fehler beim Setzen des Spieler-Skins: " + e.getMessage());
+        }
+    }
+
+    private void spawnHolograms(Npc npc, Location baseLoc) {
+        clearHolograms(npc.getId());
+
+        List<String> lines = getLinesForNpc(npc);
+        if (lines.isEmpty()) return;
+
+        List<ArmorStand> list = new ArrayList<>();
+
+        double baseOffset = 2.3;
+        double step = 0.28;
+
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            double yOffset = baseOffset + (lines.size() - 1 - i) * step;
+
+            Location lineLoc = baseLoc.clone().add(0, yOffset, 0);
+            ArmorStand holo = baseLoc.getWorld().spawn(lineLoc, ArmorStand.class, s -> {
+                s.setMarker(true);
+                s.setGravity(false);
+                s.setInvisible(true);
+                s.setCustomNameVisible(true);
+                s.setCustomName(line);
+                s.setSmall(true);
+                s.setBasePlate(false);
+                s.setArms(false);
+                try {
+                    s.setPersistent(false);
+                } catch (NoSuchMethodError ignored) {
+                }
+            });
+
+            list.add(holo);
+        }
+
+        holograms.put(npc.getId(), list);
+    }
+
+    private void clearHolograms(int npcId) {
+        List<ArmorStand> list = holograms.remove(npcId);
+        if (list == null) return;
+        for (ArmorStand as : list) as.remove();
+    }
+
+    private List<String> getLinesForNpc(Npc npc) {
+        List<String> lines = new ArrayList<>();
+        String type = npc.getType() != null ? npc.getType().toUpperCase() : "";
+
+        lines.add("§b§lGalacticfy");
+
+        switch (type) {
+            case "CB_SELECTOR", "CITYBUILD_SELECTOR", "CITYBUILD" -> {
+                lines.add("§a§lCitybuild");
+                lines.add("§7Rechtsklick für §aCB-1");
+            }
+            case "SKYBLOCK_SELECTOR", "SKYBLOCK" -> {
+                lines.add("§3§lSkyblock");
+                lines.add("§7Rechtsklick für §3SB-1");
+            }
+            case "SERVER_SELECTOR" -> {
+                lines.add("§b§lServer-Selector");
+                lines.add("§7Rechtsklick für Auswahl");
+            }
+            case "INFO" -> {
+                lines.add("§e§lInfo");
+                lines.add("§7Rechtsklick für Informationen");
+            }
+            default -> {
+                lines.add("§7NPC");
+                lines.add("§fRechtsklick");
             }
         }
 
-        logger.info("[GalacticfyChat] " + count + " NPC(s) gespawnt.");
-
-        // Startet/Neustartet den "look at player" Task
-        startLookTask();
+        return lines;
     }
 
-    // --------------------------------------------------------------------
-    // Einzelnen NPC spawnen
-    // --------------------------------------------------------------------
-    private boolean spawnNpc(NpcData data) {
-        // world MUSS gesetzt sein
-        if (data.world() == null || data.world().isBlank()) {
-            logger.warning("[GalacticfyChat] NPC '" + data.id()
-                    + "' hat keine Welt (world = null) und wird übersprungen.");
-            return false;
+    // =========================================================
+    //  CRUD
+    // =========================================================
+    public Npc createNpcAtPlayer(Player player, String name, String type, String targetServer) {
+        Location loc = player.getLocation();
+
+        Npc npc = new Npc(
+                0,
+                serverName,
+                name,
+                loc.getWorld().getName(),
+                loc.getX(),
+                loc.getY(),
+                loc.getZ(),
+                loc.getYaw(),
+                loc.getPitch(),
+                type,
+                targetServer,
+                null
+        );
+
+        Npc saved = repo.insert(npc);
+        cache.put(saved.getId(), saved);
+        spawnNpc(saved);
+        return saved;
+    }
+
+    public void despawnNpc(int id) {
+        Entity e = spawned.remove(id);
+        if (e != null) e.remove();
+        clearHolograms(id);
+        cache.remove(id);
+    }
+
+    public Npc getNpcByEntity(Entity e) {
+        for (var entry : spawned.entrySet()) {
+            if (entry.getValue().getUniqueId().equals(e.getUniqueId())) {
+                return cache.get(entry.getKey());
+            }
         }
+        return null;
+    }
 
-        World world = Bukkit.getWorld(data.world());
-        if (world == null) {
-            logger.warning("[GalacticfyChat] NPC '" + data.id()
-                    + "': Welt '" + data.world() + "' existiert nicht, wird übersprungen.");
-            return false;
-        }
+    public Map<Integer, Npc> getCache() {
+        return cache;
+    }
 
-        // Koordinaten – in deiner DB sind das DOUBLE, daher hier primitive double
-        double x = data.x();
-        double y = data.y();
-        double z = data.z();
-        float yaw = data.yaw();
-        float pitch = data.pitch();
+    public boolean moveNpc(int id, Location newLoc) {
+        Npc old = cache.get(id);
+        if (old == null) return false;
 
-        Location loc = new Location(world, x, y, z, yaw, pitch);
+        String worldName = newLoc.getWorld() != null
+                ? newLoc.getWorld().getName()
+                : old.getWorldName();
 
-        // Villager als NPC
-        Villager villager = world.spawn(loc, Villager.class, v -> {
-            v.setAI(false);
-            v.setGravity(false);
-            v.setCollidable(false);
-            v.setSilent(true);
-            v.setPersistent(true);
+        repo.updateLocation(
+                id,
+                worldName,
+                newLoc.getX(),
+                newLoc.getY(),
+                newLoc.getZ(),
+                newLoc.getYaw(),
+                newLoc.getPitch()
+        );
 
-            String display = (data.displayName() != null && !data.displayName().isBlank())
-                    ? data.displayName()
-                    : data.id();
+        Npc updated = new Npc(
+                old.getId(),
+                old.getServerName(),
+                old.getName(),
+                worldName,
+                newLoc.getX(),
+                newLoc.getY(),
+                newLoc.getZ(),
+                newLoc.getYaw(),
+                newLoc.getPitch(),
+                old.getType(),
+                old.getTargetServer(),
+                old.getSkinUuid()
+        );
 
-            String colored = ChatColor.translateAlternateColorCodes('&', display);
-            v.setCustomName(colored);
-            v.setCustomNameVisible(true);
-        });
-
-        npcs.put(data.id(), villager);
+        cache.put(id, updated);
+        spawnNpc(updated);
         return true;
     }
 
-    // --------------------------------------------------------------------
-    // NPCs "schauen" zum nächsten Spieler
-    // --------------------------------------------------------------------
-    private void startLookTask() {
-        if (lookTask != null) {
-            lookTask.cancel();
-        }
+    public boolean renameNpc(int id, String newName) {
+        Npc old = cache.get(id);
+        if (old == null) return false;
+
+        repo.updateName(id, newName);
+
+        Npc updated = new Npc(
+                old.getId(),
+                old.getServerName(),
+                newName,
+                old.getWorldName(),
+                old.getX(),
+                old.getY(),
+                old.getZ(),
+                old.getYaw(),
+                old.getPitch(),
+                old.getType(),
+                old.getTargetServer(),
+                old.getSkinUuid()
+        );
+
+        cache.put(id, updated);
+        spawnNpc(updated);
+        return true;
+    }
+
+    public boolean retargetNpc(int id, String newType, String newTargetServer) {
+        Npc old = cache.get(id);
+        if (old == null) return false;
+
+        repo.updateTypeAndTarget(id, newType, newTargetServer);
+
+        Npc updated = new Npc(
+                old.getId(),
+                old.getServerName(),
+                old.getName(),
+                old.getWorldName(),
+                old.getX(),
+                old.getY(),
+                old.getZ(),
+                old.getYaw(),
+                old.getPitch(),
+                newType,
+                newTargetServer,
+                old.getSkinUuid()
+        );
+
+        cache.put(id, updated);
+        spawnNpc(updated);
+        return true;
+    }
+
+    // =========================================================
+    //  Auto-Look (schnell, ohne Delay)
+    // =========================================================
+    public void startLookTask() {
+        stopLookTask();
 
         lookTask = Bukkit.getScheduler().runTaskTimer(
                 plugin,
                 () -> {
                     try {
-                        for (LivingEntity npc : npcs.values()) {
-                            if (npc == null || npc.isDead()) continue;
+                        if (spawned.isEmpty()) return;
 
-                            // nächsten Spieler im selben World suchen
-                            var world = npc.getWorld();
-                            var players = world.getPlayers();
-                            if (players.isEmpty()) continue;
+                        for (Entity e : spawned.values()) {
+                            if (!(e instanceof LivingEntity living)) continue;
 
-                            var locNpc = npc.getLocation();
-                            double bestDistSq = Double.MAX_VALUE;
-                            Location target = null;
+                            Location npcLoc = living.getLocation();
+                            Player nearest = getNearestPlayer(npcLoc, 8.0);
+                            if (nearest == null) continue;
 
-                            for (var p : players) {
-                                double distSq = p.getLocation().distanceSquared(locNpc);
-                                if (distSq < bestDistSq) {
-                                    bestDistSq = distSq;
-                                    target = p.getLocation();
-                                }
-                            }
+                            Location eye = nearest.getEyeLocation();
+                            double dx = eye.getX() - npcLoc.getX();
+                            double dy = eye.getY() - (npcLoc.getY() + 1.6);
+                            double dz = eye.getZ() - npcLoc.getZ();
 
-                            if (target == null) continue;
-
-                            // Yaw berechnen, damit NPC den Spieler anschaut
-                            double dx = target.getX() - locNpc.getX();
-                            double dz = target.getZ() - locNpc.getZ();
-                            double dy = (target.getY() + 1.6) - (locNpc.getY() + 1.6);
+                            double distXZ = Math.sqrt(dx * dx + dz * dz);
+                            if (distXZ < 0.001) continue;
 
                             float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-                            float pitch = (float) Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+                            float pitch = (float) Math.toDegrees(-Math.atan2(dy, distXZ));
 
-                            Location newLoc = locNpc.clone();
-                            newLoc.setYaw(yaw);
-                            newLoc.setPitch(pitch);
-
-                            npc.teleport(newLoc);
+                            try {
+                                // versuch nur Rotation zu setzen
+                                living.setRotation(yaw, pitch);
+                            } catch (NoSuchMethodError err) {
+                                // fallback: Teleport mit neuer Rotation
+                                npcLoc.setYaw(yaw);
+                                npcLoc.setPitch(pitch);
+                                living.teleport(npcLoc);
+                            }
                         }
                     } catch (Exception ex) {
-                        logger.warning("[GalacticfyChat] Fehler im NPC-LookTask: " + ex.getMessage());
+                        plugin.getLogger().warning("[NPC] Fehler im LookTask: " + ex.getMessage());
+                        ex.printStackTrace();
                     }
                 },
-                20L,   // Start nach 1 Sekunde
-                5L     // alle 5 Ticks (~0,25s)
+                1L,   // Start nach 1 Tick
+                1L    // JEDEN Tick
         );
     }
 
-    // --------------------------------------------------------------------
-    // Alles despawnen
-    // --------------------------------------------------------------------
-    public void despawnAll() {
+    public void stopLookTask() {
         if (lookTask != null) {
             lookTask.cancel();
             lookTask = null;
         }
+    }
 
-        for (Entity e : npcs.values()) {
-            if (e != null && !e.isDead()) {
-                e.remove();
+    private Player getNearestPlayer(Location loc, double radius) {
+        Player closest = null;
+        double closestDistSq = radius * radius;
+
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (!p.getWorld().equals(loc.getWorld())) continue;
+
+            double distSq = p.getLocation().distanceSquared(loc);
+            if (distSq <= closestDistSq) {
+                closestDistSq = distSq;
+                closest = p;
             }
         }
-        npcs.clear();
-        logger.info("[GalacticfyChat] Alle NPCs wurden despawnt.");
+        return closest;
     }
 }

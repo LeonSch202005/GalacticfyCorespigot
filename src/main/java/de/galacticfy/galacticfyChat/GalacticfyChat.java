@@ -4,9 +4,7 @@ import de.galacticfy.galacticfyChat.db.DatabaseManager;
 import de.galacticfy.galacticfyChat.listener.ChatListener;
 import de.galacticfy.galacticfyChat.listener.JoinQuitListener;
 import de.galacticfy.galacticfyChat.listener.NametagListener;
-import de.galacticfy.galacticfyChat.npc.NpcManager;
-import de.galacticfy.galacticfyChat.npc.NpcRepository;
-import de.galacticfy.galacticfyChat.npc.NpcPosCommand;
+import de.galacticfy.galacticfyChat.npc.*;
 import de.galacticfy.galacticfyChat.punish.PunishmentReader;
 import de.galacticfy.galacticfyChat.rank.SimpleRankService;
 import de.galacticfy.galacticfyChat.scoreboard.GlobalScoreboardService;
@@ -31,40 +29,67 @@ public class GalacticfyChat extends JavaPlugin {
     private static GalacticfyChat instance;
     public static GalacticfyChat getInstance() { return instance; }
 
+    public NpcManager getNpcManager() {
+        return npcManager;
+    }
+
     @Override
     public void onEnable() {
         instance = this;
         getLogger().info("[GalacticfyChat] startet...");
 
+        // ============================
         // DB
+        // ============================
         this.databaseManager = new DatabaseManager(getLogger());
         this.databaseManager.init();
 
+        // ============================
         // Services
+        // ============================
         this.rankService = new SimpleRankService(databaseManager, getLogger());
         this.scoreboardService = new GlobalScoreboardService(rankService);
         this.punishmentReader = new PunishmentReader(databaseManager, getLogger());
 
-        // 🔹 NPC-System
+        // ============================
+        // NPC-System
+        // ============================
         this.npcRepository = new NpcRepository(databaseManager, getLogger());
+
         String serverName = getServer().getName(); // z.B. Lobby-1
-
         this.npcManager = new NpcManager(this, npcRepository, serverName);
-        npcManager.loadAndSpawnAll();
 
+        // NPCs direkt beim Start laden + LookTask
+        npcManager.loadAndSpawnAll();
+        npcManager.startLookTask();
+
+        // ============================
+        // BungeeCord-Channel
+        // ============================
+        getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
+
+        // ============================
         // Listener
+        // ============================
         getServer().getPluginManager().registerEvents(
                 new ChatListener(rankService, punishmentReader), this);
         getServer().getPluginManager().registerEvents(new JoinQuitListener(), this);
         getServer().getPluginManager().registerEvents(new NametagListener(rankService), this);
+        getServer().getPluginManager().registerEvents(new NpcInteractListener(npcManager), this);
+        getServer().getPluginManager().registerEvents(new NpcProtectionListener(npcManager), this);
+        getServer().getPluginManager().registerEvents(new NpcConnectGui(), this);
 
+        // ============================
         // Bereits online (z.B. nach /reload)
+        // ============================
         Bukkit.getOnlinePlayers().forEach(p -> {
             rankService.updateNametag(p);
             scoreboardService.updateBoard(p);
         });
 
-        // Auto-Refresh: alle 5 Sekunden
+        // ============================
+        // Auto-Refresh (Ranks + Scoreboard)
+        // ============================
         refreshTask = Bukkit.getScheduler().runTaskTimer(
                 this,
                 () -> {
@@ -76,17 +101,19 @@ public class GalacticfyChat extends JavaPlugin {
                         ex.printStackTrace();
                     }
                 },
-                20L,   // erster Lauf nach 1 Sekunde
-                100L   // danach alle 5 Sekunden
+                20L,   // 1 Sekunde
+                100L   // alle 5 Sekunden
         );
 
-        // 🔹 Command-Executor für /npcpos registrieren
-        if (getCommand("npcpos") != null) {
-            getCommand("npcpos").setExecutor(
-                    new NpcPosCommand(this, npcRepository, npcManager, serverName)
-            );
+        // ============================
+        // /npc Command
+        // ============================
+        if (getCommand("npc") != null) {
+            NpcCommand npcCommand = new NpcCommand(this, npcRepository, npcManager, serverName);
+            getCommand("npc").setExecutor(npcCommand);
+            getCommand("npc").setTabCompleter(npcCommand);
         } else {
-            getLogger().warning("[GalacticfyChat] Command 'npcpos' ist nicht in plugin.yml registriert!");
+            getLogger().warning("[GalacticfyChat] Command 'npc' ist nicht in plugin.yml registriert!");
         }
 
         getLogger().info("[GalacticfyChat] wurde aktiviert.");
@@ -94,12 +121,14 @@ public class GalacticfyChat extends JavaPlugin {
 
     @Override
     public void onDisable() {
+
         if (refreshTask != null) {
             refreshTask.cancel();
             refreshTask = null;
         }
 
         if (npcManager != null) {
+            npcManager.stopLookTask();
             npcManager.despawnAll();
         }
 
@@ -111,7 +140,7 @@ public class GalacticfyChat extends JavaPlugin {
     }
 
     public SimpleRankService getRankService() {
-        return rankService;//test
+        return rankService;
     }
 
     public GlobalScoreboardService getScoreboardService() {
@@ -119,7 +148,7 @@ public class GalacticfyChat extends JavaPlugin {
     }
 
     // ------------------------------------------------------------
-    // /npcreload Command (geht über onCommand, NICHT extra Executor)s
+    // /npcreload Command (geht über onCommand, NICHT extra Executor)
     // ------------------------------------------------------------
     @Override
     public boolean onCommand(CommandSender sender,
