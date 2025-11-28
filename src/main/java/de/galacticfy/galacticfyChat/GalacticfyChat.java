@@ -119,7 +119,7 @@ public class GalacticfyChat extends JavaPlugin {
     }
 
     // ------------------------------------------------------------
-    // /npcreload Command (geht über onCommand, NICHT extra Executor)
+    // /npcreload Command (geht über onCommand, NICHT extra Executor)s
     // ------------------------------------------------------------
     @Override
     public boolean onCommand(CommandSender sender,
