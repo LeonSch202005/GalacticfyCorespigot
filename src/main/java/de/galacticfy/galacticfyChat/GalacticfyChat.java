@@ -6,6 +6,7 @@ import de.galacticfy.galacticfyChat.listener.JoinQuitListener;
 import de.galacticfy.galacticfyChat.listener.NametagListener;
 import de.galacticfy.galacticfyChat.npc.*;
 import de.galacticfy.galacticfyChat.punish.PunishmentReader;
+import de.galacticfy.galacticfyChat.quest.QuestGuiListener;
 import de.galacticfy.galacticfyChat.rank.SimpleRankService;
 import de.galacticfy.galacticfyChat.scoreboard.GlobalScoreboardService;
 import org.bukkit.Bukkit;
@@ -64,12 +65,21 @@ public class GalacticfyChat extends JavaPlugin {
         npcManager.startLookTask();
 
         // ============================
-        // BungeeCord-Channel
+        // Plugin-Message Channels
         // ============================
+        // BungeeCord
         getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
 
+        // Quest-GUI
+        QuestGuiListener questGui = new QuestGuiListener(this);
+        getServer().getMessenger().registerIncomingPluginChannel(this, "galacticfy:quests", questGui);
+        getServer().getMessenger().registerOutgoingPluginChannel(this, "galacticfy:quests");
+
+        // Listener für Inventar-Events
+        getServer().getPluginManager().registerEvents(questGui, this);
+
         // ============================
-        // Listener
+        // Listener (Chat / Join / NPCs etc.)
         // ============================
         getServer().getPluginManager().registerEvents(
                 new ChatListener(rankService, punishmentReader), this);
@@ -148,7 +158,7 @@ public class GalacticfyChat extends JavaPlugin {
     }
 
     // ------------------------------------------------------------
-    // /npcreload Command (geht über onCommand, NICHT extra Executor)
+    // /npcreload Command
     // ------------------------------------------------------------
     @Override
     public boolean onCommand(CommandSender sender,
