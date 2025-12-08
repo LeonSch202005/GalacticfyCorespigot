@@ -12,3 +12,10 @@ commands:
   npcreload:
     description: Lädt alle NPCs neu
     permission: galacticfy.npc.reload
+
+  questadmin:
+    description: Öffnet das Quest-Admin-GUI
+    usage: /questadmin
+    permission: galacticfy.quests.admin
+    permission-message: §cDazu hast du keine Berechtigung.
+

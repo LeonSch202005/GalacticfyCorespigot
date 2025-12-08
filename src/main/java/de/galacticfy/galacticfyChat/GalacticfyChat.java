@@ -1,17 +1,17 @@
 package de.galacticfy.galacticfyChat;
 
 import de.galacticfy.galacticfyChat.db.DatabaseManager;
-import de.galacticfy.galacticfyChat.listener.ChatListener;
-import de.galacticfy.galacticfyChat.listener.JoinQuitListener;
-import de.galacticfy.galacticfyChat.listener.NametagListener;
+import de.galacticfy.galacticfyChat.listener.*;
 import de.galacticfy.galacticfyChat.npc.*;
 import de.galacticfy.galacticfyChat.punish.PunishmentReader;
-import de.galacticfy.galacticfyChat.quest.QuestGuiListener;
+import de.galacticfy.galacticfyChat.quest.*;
 import de.galacticfy.galacticfyChat.rank.SimpleRankService;
 import de.galacticfy.galacticfyChat.scoreboard.GlobalScoreboardService;
+import de.galacticfy.galacticfyChat.listener.QuestWalkListener;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -60,23 +60,66 @@ public class GalacticfyChat extends JavaPlugin {
         String serverName = getServer().getName(); // z.B. Lobby-1
         this.npcManager = new NpcManager(this, npcRepository, serverName);
 
-        // NPCs direkt beim Start laden + LookTask
         npcManager.loadAndSpawnAll();
         npcManager.startLookTask();
 
         // ============================
         // Plugin-Message Channels
         // ============================
-        // BungeeCord
+
+        // BungeeCord (falls du das noch nutzt)
         getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
 
-        // Quest-GUI
+        // Quest-GUI (Proxy -> Spigot)
         QuestGuiListener questGui = new QuestGuiListener(this);
         getServer().getMessenger().registerIncomingPluginChannel(this, "galacticfy:quests", questGui);
         getServer().getMessenger().registerOutgoingPluginChannel(this, "galacticfy:quests");
 
-        // Listener für Inventar-Events
+        // Stats für Quests (Spigot -> Proxy)
+        QuestEventSender questEventSender = new QuestEventSender(this);
+        getServer().getMessenger().registerOutgoingPluginChannel(this, "galacticfy:queststats");
+
+        // ============================
+        // Listener – Quests
+        // ============================
+
+        // GUI
         getServer().getPluginManager().registerEvents(questGui, this);
+
+        // Admin-GUI (/questadmin)
+        QuestAdminGui questAdminGui = new QuestAdminGui(this);
+        getServer().getPluginManager().registerEvents(questAdminGui, this);
+        if (getCommand("questadmin") != null) {
+            getCommand("questadmin").setExecutor(questAdminGui);
+        } else {
+            getLogger().warning("[GalacticfyChat] Command 'questadmin' ist nicht in plugin.yml registriert!");
+        }
+
+        // Allgemeine Stats (Playtime, Pflanz-Abuse-Schutz, einige Blöcke, etc.)
+        getServer().getPluginManager().registerEvents(new QuestStatsListener(questEventSender), this);
+
+        // Walk-Quests (Laufen)
+        getServer().getPluginManager().registerEvents(
+                new QuestWalkListener(questEventSender),
+                this
+        );
+
+        // Combat-Quests (Mobs / Zombies / Creeper / PvP / Death)
+        getServer().getPluginManager().registerEvents(new QuestCombatListener(questEventSender), this);
+
+        // Crafting-Quests
+        getServer().getPluginManager().registerEvents(new CraftingListener(questEventSender), this);
+
+        // Smelt-Quests
+        getServer().getPluginManager().registerEvents(new FurnaceSmeltListener(questEventSender), this);
+
+        // Villager-Trades (inkl. Shift-Klick)
+        getServer().getPluginManager().registerEvents(new VillagerTradeListener(questEventSender), this);
+
+        // Fischen (FISH-Stat)
+        getServer().getPluginManager().registerEvents(new FishingListener(questEventSender), this);
+
+        // KEINE Community-Listener / quest_events mehr!
 
         // ============================
         // Listener (Chat / Join / NPCs etc.)
@@ -92,23 +135,26 @@ public class GalacticfyChat extends JavaPlugin {
         // ============================
         // Bereits online (z.B. nach /reload)
         // ============================
-        Bukkit.getOnlinePlayers().forEach(p -> {
+        for (Player p : Bukkit.getOnlinePlayers()) {
             rankService.updateNametag(p);
             scoreboardService.updateBoard(p);
-        });
+        }
 
         // ============================
         // Auto-Refresh (Ranks + Scoreboard)
         // ============================
         refreshTask = Bukkit.getScheduler().runTaskTimer(
                 this,
-                () -> {
-                    try {
-                        rankService.refreshAllOnline();
-                        scoreboardService.refreshAll();
-                    } catch (Exception ex) {
-                        getLogger().warning("[GalacticfyChat] Fehler beim Auto-Refresh: " + ex.getMessage());
-                        ex.printStackTrace();
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            rankService.refreshAllOnline();
+                            scoreboardService.refreshAll();
+                        } catch (Exception ex) {
+                            getLogger().warning("[GalacticfyChat] Fehler beim Auto-Refresh: " + ex.getMessage());
+                            ex.printStackTrace();
+                        }
                     }
                 },
                 20L,   // 1 Sekunde
