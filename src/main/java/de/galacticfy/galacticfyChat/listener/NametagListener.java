@@ -37,3 +37,4 @@ public class NametagListener implements Listener {
         rankService.clearNametag(event.getPlayer());
     }
 }
+

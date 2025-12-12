@@ -170,6 +170,7 @@ public class SimpleRankService {
                 .append(nameComp);
     }
 
+
     // Für Scoreboard/Sidebar: &-Codes zurückgeben
     public String getLegacyRankPrefix(Player player) {
         SimpleRole role = getRoleFor(player.getUniqueId());
@@ -195,36 +196,31 @@ public class SimpleRankService {
         String rank = ChatColor.translateAlternateColorCodes('&', prefixRaw);
         String fullPrefix = rank + ChatColor.DARK_GRAY + " ✦ " + ChatColor.GRAY;
 
-        // Ordnung für Tablist
         int priority = (role != null) ? role.joinPriority : 0;
         int order = 99 - Math.max(Math.min(priority, 99), 0);
 
         String teamName = String.format("gf%02d_%d", order, role != null ? role.id : 0);
         if (teamName.length() > 16) teamName = teamName.substring(0, 16);
 
-        // Für ALLE Spieler durchgehen — damit jeder das sieht!
         for (Player viewer : Bukkit.getOnlinePlayers()) {
 
             Scoreboard board = viewer.getScoreboard();
-            // wenn Standard → eigenes
             if (board == Bukkit.getScoreboardManager().getMainScoreboard()) {
                 board = Bukkit.getScoreboardManager().getNewScoreboard();
                 viewer.setScoreboard(board);
             }
 
-            // Team pro Board setzen
             Team team = board.getTeam(teamName);
             if (team == null)
                 team = board.registerNewTeam(teamName);
 
-            // Prefix + Name-Farbe
             team.setPrefix(fullPrefix);
             team.setColor(ChatColor.GRAY);
 
-            // Spieler hinzufügen
             team.addEntry(target.getName());
         }
     }
+
 
 
     public void clearNametag(Player player) {
@@ -233,6 +229,7 @@ public class SimpleRankService {
             t.removeEntry(player.getName());
         }
     }
+
 
     /**
      * Wird vom Auto-Refresh aufgerufen:

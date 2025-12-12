@@ -1,7 +1,6 @@
 package de.galacticfy.galacticfyChat.quest;
 
 import org.bukkit.Material;
-import org.bukkit.Tag;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.Ageable;
@@ -11,6 +10,8 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.inventory.ItemStack;
 
 import java.util.EnumSet;
 import java.util.Set;
@@ -180,5 +181,28 @@ public class QuestStatsListener implements Listener {
                 // nichts senden
             }
         }
+    }
+
+    // ============================
+    // Item-Pickup -> Event-Stats
+    // ============================
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.MONITOR)
+    public void onPickup(EntityPickupItemEvent e) {
+        if (!(e.getEntity() instanceof Player p)) {
+            return;
+        }
+
+        ItemStack stack = e.getItem().getItemStack();
+        if (stack.getType() != Material.SNOWBALL) {
+            return;
+        }
+
+        int amount = stack.getAmount();
+        if (amount <= 0) {
+            return;
+        }
+
+        // Schneeball-Eventstat für Weihnachtsevent
+        questEventSender.sendStat(p, "EVENT_SNOWBALL", amount);
     }
 }

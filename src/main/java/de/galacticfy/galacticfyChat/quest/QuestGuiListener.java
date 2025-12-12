@@ -145,13 +145,33 @@ public class QuestGuiListener implements Listener, PluginMessageListener {
 
     @Override
     public void onPluginMessageReceived(String channel, Player player, byte[] message) {
-        if (!CHANNEL.equals(channel)) return;
+        // Debug: Grund-Infos loggen
+        Bukkit.getLogger().info("[Quests-Spigot] PluginMessage erhalten: channel=" + channel
+                + ", player=" + (player != null ? player.getName() : "null")
+                + ", bytes=" + (message != null ? message.length : -1));
+
+        if (!CHANNEL.equals(channel)) {
+            Bukkit.getLogger().info("[Quests-Spigot] Falscher Channel (" + channel + "), erwartet: " + CHANNEL);
+            return;
+        }
+
+        if (player == null) {
+            Bukkit.getLogger().warning("[Quests-Spigot] PluginMessage ohne Player erhalten – breche ab.");
+            return;
+        }
 
         String payload = new String(message, StandardCharsets.UTF_8);
+        Bukkit.getLogger().info("[Quests-Spigot] Payload:\n" + payload);
+
         String[] lines = payload.split("\n");
-        if (lines.length == 0) return;
+        if (lines.length == 0) {
+            Bukkit.getLogger().warning("[Quests-Spigot] Payload hat keine Zeilen, breche ab.");
+            return;
+        }
 
         String mode = lines[0].trim(); // OPEN oder UPDATE
+        Bukkit.getLogger().info("[Quests-Spigot] MODE=" + mode + ", Zeilen=" + lines.length);
+
         List<QuestEntry> list = new ArrayList<>();
 
         for (int i = 1; i < lines.length; i++) {
@@ -162,7 +182,7 @@ public class QuestGuiListener implements Listener, PluginMessageListener {
             // ERWARTET: mindestens 9 Felder (claimed ist optional als 10. Feld)
             // key|title|desc|type|goal|progress|galas|stardust|completed[|claimed]
             if (parts.length < 9) {
-                Bukkit.getLogger().warning("[Quests] Ignoriere Zeile (zu wenige Felder): " + line);
+                Bukkit.getLogger().warning("[Quests-Spigot] Ignoriere Zeile (zu wenige Felder): " + line);
                 continue;
             }
 
@@ -183,7 +203,7 @@ public class QuestGuiListener implements Listener, PluginMessageListener {
                 type = QuestType.valueOf(typeString.toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException ex) {
                 // Unbekannt / COMMUNITY -> ignorieren
-                Bukkit.getLogger().warning("[Quests] Unbekannter Quest-Typ: " + typeString + " in Zeile: " + line);
+                Bukkit.getLogger().warning("[Quests-Spigot] Unbekannter Quest-Typ: " + typeString + " in Zeile: " + line);
                 continue;
             }
 
@@ -200,9 +220,12 @@ public class QuestGuiListener implements Listener, PluginMessageListener {
             list.add(e);
         }
 
+        Bukkit.getLogger().info("[Quests-Spigot] Parsed Quests: " + list.size());
+
         questsPerPlayer.put(player.getUniqueId(), list);
 
         if (mode.equalsIgnoreCase("OPEN")) {
+            Bukkit.getLogger().info("[Quests-Spigot] Öffne Hauptmenü für " + player.getName());
             openMainMenu(player);
             return;
         }
@@ -213,6 +236,7 @@ public class QuestGuiListener implements Listener, PluginMessageListener {
             if (player.getOpenInventory() != null &&
                     player.getOpenInventory().getTopInventory() != null &&
                     "Quests".equals(player.getOpenInventory().getTitle())) {
+                Bukkit.getLogger().info("[Quests-Spigot] UPDATE → refresh MainMenu für " + player.getName());
                 openMainMenu(player);
             }
         } else {
@@ -221,6 +245,7 @@ public class QuestGuiListener implements Listener, PluginMessageListener {
                     player.getOpenInventory() != null &&
                     player.getOpenInventory().getTopInventory() != null &&
                     player.getOpenInventory().getTitle().startsWith("Quests |")) {
+                Bukkit.getLogger().info("[Quests-Spigot] UPDATE → refresh Liste (" + type + ") für " + player.getName());
                 openQuestList(player, type);
             }
         }

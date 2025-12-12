@@ -23,7 +23,6 @@ public class ChatListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onChat(AsyncChatEvent event) {
-
         Player player = event.getPlayer();
 
         // 1) Mute aus DB prüfen
@@ -47,5 +46,6 @@ public class ChatListener implements Listener {
 
         player.getServer().getOnlinePlayers().forEach(p -> p.sendMessage(out));
     }
+
 
 }

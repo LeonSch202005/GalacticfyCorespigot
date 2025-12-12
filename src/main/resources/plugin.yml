@@ -4,6 +4,7 @@ main: de.galacticfy.galacticfyChat.GalacticfyChat
 api-version: '1.21'
 softdepend:
   - LibsDisguises
+
 commands:
   npc:
     description: NPC Verwaltung
@@ -19,3 +20,21 @@ commands:
     permission: galacticfy.quests.admin
     permission-message: §cDazu hast du keine Berechtigung.
 
+  gamemode:
+    description: Galacticfy Gamemode-System
+    usage: /gamemode <mode> [spieler]
+    aliases: [gm]
+    permission: galacticfy.gamemode
+    permission-message: §cDazu hast du keine Berechtigung.
+
+  back:
+    description: Teleportiert dich zu deinem letzten Ort (server-intern)
+    usage: /back
+
+  spawn:
+    description: Teleportiert dich zum Server-Spawn
+    usage: /spawn
+
+  setspawn:
+    description: Setzt den Server-Spawn auf deine Position
+    usage: /setspawn
